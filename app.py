@@ -35,6 +35,14 @@ def configure_logger() -> logging.Logger:
     return logger
 
 
+def add_cors_headers(response: Response) -> Response:
+    origin = os.environ.get("FACE_AGE_ALLOWED_ORIGIN", "*")
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    return response
+
+
 class FaceService:
     def __init__(self, models_dir: str) -> None:
         self.lock = threading.Lock()
@@ -104,18 +112,24 @@ def create_app(service: FaceService) -> Flask:
     app = Flask(__name__)
     logger = configure_logger()
 
+    @app.after_request
+    def apply_cors(response: Response) -> Response:
+        return add_cors_headers(response)
+
     @app.get("/")
     def index() -> str:
-        analyze_url = os.environ.get("FACE_AGE_ANALYZE_URL") or url_for("analyze", _external=True)
-        client_log_url = os.environ.get("FACE_AGE_CLIENT_LOG_URL") or url_for("client_log", _external=True)
+        analyze_url = os.environ.get("FACE_AGE_ANALYZE_URL") or "analyze"
+        client_log_url = os.environ.get("FACE_AGE_CLIENT_LOG_URL") or "client-log"
         return render_template(
             "index.html",
             analyze_url=analyze_url,
             client_log_url=client_log_url,
         )
 
-    @app.post("/client-log")
+    @app.route("/client-log", methods=["POST", "OPTIONS"])
     def client_log() -> Response:
+        if request.method == "OPTIONS":
+            return jsonify({"ok": True})
         payload = request.get_json(silent=True) or {}
         event = str(payload.get("event", "unknown")).strip() or "unknown"
         message = str(payload.get("message", "")).strip()
@@ -129,8 +143,10 @@ def create_app(service: FaceService) -> Flask:
         )
         return jsonify({"ok": True})
 
-    @app.post("/analyze")
+    @app.route("/analyze", methods=["POST", "OPTIONS"])
     def analyze() -> Response:
+        if request.method == "OPTIONS":
+            return jsonify({"ok": True})
         payload = request.get_json(silent=True) or {}
         image = payload.get("image")
         if not image:

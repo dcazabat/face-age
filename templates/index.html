@@ -58,10 +58,18 @@
     async function sendClientLog(event, message, details = {}) {
       if (!clientLogUrl) return;
       try {
+        const payload = JSON.stringify({ event, message, details });
+        if (navigator.sendBeacon) {
+          const beaconSent = navigator.sendBeacon(
+            clientLogUrl,
+            new Blob([payload], { type: "application/json" }),
+          );
+          if (beaconSent) return;
+        }
         await fetch(clientLogUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ event, message, details }),
+          body: payload,
           keepalive: true,
         });
       } catch (_) {

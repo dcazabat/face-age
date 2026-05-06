@@ -74,14 +74,14 @@ En el primer arranque, la aplicacion descarga automaticamente los modelos necesa
 
 Estas variables ayudan cuando el frontend y el backend no comparten el mismo origen en produccion:
 
-- `FACE_AGE_ANALYZE_URL`: URL absoluta del endpoint `POST /analyze`.
-- `FACE_AGE_CLIENT_LOG_URL`: URL absoluta del endpoint `POST /client-log`.
+- `FACE_AGE_ALLOWED_ORIGIN`: origen permitido por CORS para navegadores. Por defecto usa `*`.
 
 Ejemplo:
 
 ```bash
 export FACE_AGE_ANALYZE_URL="https://api.ejemplo.com/analyze"
 export FACE_AGE_CLIENT_LOG_URL="https://api.ejemplo.com/client-log"
+export FACE_AGE_ALLOWED_ORIGIN="https://frontend.ejemplo.com"
 python app.py
 ```
 

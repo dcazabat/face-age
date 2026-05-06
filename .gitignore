@@ -174,3 +174,6 @@ models/
 
 # No captures
 captures/
+
+# No logs
+logs/
