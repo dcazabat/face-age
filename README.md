@@ -10,6 +10,9 @@ Aplicacion web en Flask para reconocimiento facial en tiempo real desde el naveg
 - Overlay visual sobre el video con cajas y etiquetas de resultados.
 - Descarga de capturas del video con el overlay dibujado.
 - Registro persistente de eventos y errores en `logs/face-age.log`.
+- Control en pantalla para ajustar el refresco del analisis entre 1 y 10 segundos.
+- Un solo boton para encender o apagar la camara segun el estado actual.
+- El valor del refresco se guarda en `localStorage` y se restaura al recargar la pagina.
 
 ## Requisitos
 
@@ -56,7 +59,7 @@ python app.py --host 0.0.0.0 --port 8000 --models-dir models
 
 1. Abrir la pagina en el navegador.
 2. Dar permisos de camara.
-3. Hacer clic en `Encender camara`.
+3. Hacer clic en `Encender camara` y volver a pulsar el mismo boton para apagarla.
 4. Ver los resultados superpuestos sobre el video.
 5. Usar `Capturar` para descargar una imagen con el overlay.
 
@@ -98,7 +101,9 @@ El backend escribe eventos y errores en `logs/face-age.log` usando rotacion de a
 
 - `app.py`: servidor Flask, logging y endpoints HTTP.
 - `main.py`: carga de modelos y analisis de imagenes.
-- `templates/index.html`: interfaz web y logica del navegador.
+- `templates/index.html`: plantilla HTML principal.
+- `static/css/style.css`: estilos de la interfaz.
+- `static/js/app.js`: logica del navegador.
 - `models/`: modelos descargados por la aplicacion.
 - `captures/`: capturas generadas por la app.
 - `logs/`: archivo de log rotativo del backend.

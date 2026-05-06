@@ -4,10 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Face Age - Flask</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="static/css/style.css">
 </head>
-<body class="min-h-screen bg-slate-950 text-slate-100">
-  <div class="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.2),_transparent_45%),radial-gradient(circle_at_80%_20%,_rgba(168,85,247,0.18),_transparent_35%)]"></div>
+<body
+  class="min-h-screen bg-slate-950 text-slate-100"
+  data-face-age-analyze-url="{{ analyze_url }}"
+  data-face-age-client-log-url="{{ client_log_url }}"
+  data-face-age-refresh-storage-key="face-age-refresh-interval-seconds"
+>
+  <div class="background-glow"></div>
 
   <main class="relative mx-auto flex min-h-screen w-full max-w-6xl items-center px-4 py-10 sm:px-6">
     <section class="w-full rounded-2xl border border-slate-800/80 bg-slate-900/70 p-5 shadow-2xl shadow-blue-950/40 backdrop-blur md:p-8">
@@ -17,264 +22,30 @@
         <p class="mt-2 text-sm text-slate-300 md:text-base">La cámara se toma desde el navegador del visitante</p>
       </div>
 
-      <div class="mb-5 flex flex-wrap gap-3">
-        <button id="start-btn" type="button" class="rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/25">Encender cámara</button>
-        <button id="stop-btn" type="button" class="rounded-lg border border-amber-400/40 bg-amber-500/15 px-4 py-2 text-sm font-semibold text-amber-300 transition hover:bg-amber-500/25">Apagar cámara</button>
-        <button id="capture-btn" type="button" class="rounded-lg border border-blue-400/40 bg-blue-500/15 px-4 py-2 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/25">Capturar</button>
+      <div class="toolbar">
+        <div class="toolbar-actions">
+          <button id="camera-toggle-btn" type="button" class="camera-toggle-btn rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/25">Encender cámara</button>
+          <button id="capture-btn" type="button" class="rounded-lg border border-blue-400/40 bg-blue-500/15 px-4 py-2 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/25">Capturar</button>
+        </div>
+
+        <div class="controls-row">
+          <div>
+            <label for="refresh-interval">Tiempo de refresco</label>
+            <input id="refresh-interval" type="range" min="1" max="10" step="1" value="3">
+          </div>
+          <div id="refresh-interval-value" class="interval-value">3 s</div>
+        </div>
       </div>
 
-      <div id="status" class="mb-4 min-h-6 text-sm font-medium text-emerald-300"></div>
+      <div id="status" class="status status-ok"></div>
 
-      <div class="relative mx-auto w-full md:w-3/4 overflow-hidden rounded-xl border border-slate-700 bg-black" style="aspect-ratio: 16 / 9;">
+      <div class="camera-frame">
         <video id="video" autoplay muted playsinline class="block h-full w-full object-cover"></video>
         <canvas id="overlay" class="pointer-events-none absolute inset-0 block h-full w-full"></canvas>
       </div>
     </section>
   </main>
 
-  <script>
-    const okStatusClass = "mb-4 min-h-6 text-sm font-medium text-emerald-300";
-    const errorStatusClass = "mb-4 min-h-6 text-sm font-medium text-rose-300";
-
-    const statusEl = document.getElementById("status");
-    const videoEl = document.getElementById("video");
-    const overlayEl = document.getElementById("overlay");
-    const startBtn = document.getElementById("start-btn");
-    const stopBtn = document.getElementById("stop-btn");
-    const captureBtn = document.getElementById("capture-btn");
-
-    const uploadCanvas = document.createElement("canvas");
-    const uploadCtx = uploadCanvas.getContext("2d");
-    const overlayCtx = overlayEl.getContext("2d");
-    const analyzeUrl = {{ analyze_url | tojson }};
-    const clientLogUrl = {{ client_log_url | tojson }};
-    const analyzeIntervalMs = 3000;
-
-    let stream = null;
-    let analyzing = false;
-    let analyzeTimer = null;
-    let lastAnalyzeError = null;
-
-    async function sendClientLog(event, message, details = {}) {
-      if (!clientLogUrl) return;
-      try {
-        const payload = JSON.stringify({ event, message, details });
-        if (navigator.sendBeacon) {
-          const beaconSent = navigator.sendBeacon(
-            clientLogUrl,
-            new Blob([payload], { type: "application/json" }),
-          );
-          if (beaconSent) return;
-        }
-        await fetch(clientLogUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-          keepalive: true,
-        });
-      } catch (_) {
-        // Logging must never break the camera flow.
-      }
-    }
-
-    function setStatus(message, isError = false) {
-      statusEl.textContent = message;
-      statusEl.className = isError ? errorStatusClass : okStatusClass;
-    }
-
-    function stopAnalysisLoop() {
-      if (analyzeTimer) {
-        clearInterval(analyzeTimer);
-        analyzeTimer = null;
-      }
-    }
-
-    function stopCameraTracks() {
-      if (!stream) return;
-      for (const track of stream.getTracks()) {
-        track.stop();
-      }
-      stream = null;
-    }
-
-    function clearOverlay() {
-      overlayCtx.clearRect(0, 0, overlayEl.width, overlayEl.height);
-    }
-
-    function getTimestampName() {
-      const now = new Date();
-      const pad = (n) => String(n).padStart(2, "0");
-      const y = now.getFullYear();
-      const m = pad(now.getMonth() + 1);
-      const d = pad(now.getDate());
-      const hh = pad(now.getHours());
-      const mm = pad(now.getMinutes());
-      const ss = pad(now.getSeconds());
-      return `capture_${y}${m}${d}_${hh}${mm}${ss}.jpg`;
-    }
-
-    function getCurrentFrameDataUrl() {
-      const width = videoEl.videoWidth;
-      const height = videoEl.videoHeight;
-      if (!width || !height) return null;
-      uploadCanvas.width = width;
-      uploadCanvas.height = height;
-      uploadCtx.drawImage(videoEl, 0, 0, width, height);
-      return uploadCanvas.toDataURL("image/jpeg", 0.82);
-    }
-
-    async function postJson(path, body) {
-      const response = await fetch(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const raw = await response.text();
-        throw new Error(`Respuesta no JSON (${response.status}): ${raw.slice(0, 120)}`);
-      }
-      const data = await response.json();
-      if (!response.ok || data.ok === false) {
-        throw new Error(data.error || "No se pudo completar la acción");
-      }
-      return data;
-    }
-
-    function drawPredictions(predictions, frameWidth, frameHeight) {
-      const w = videoEl.clientWidth;
-      const h = videoEl.clientHeight;
-      if (!w || !h) return;
-
-      overlayEl.width = w;
-      overlayEl.height = h;
-      overlayCtx.clearRect(0, 0, w, h);
-
-      const scaleX = w / frameWidth;
-      const scaleY = h / frameHeight;
-
-      overlayCtx.lineWidth = 2;
-      overlayCtx.font = "14px sans-serif";
-
-      for (const p of predictions) {
-        const x = p.x * scaleX;
-        const y = p.y * scaleY;
-        const bw = p.w * scaleX;
-        const bh = p.h * scaleY;
-
-        overlayCtx.strokeStyle = "#22c55e";
-        overlayCtx.strokeRect(x, y, bw, bh);
-
-        const label = `Edad ~${p.age}+ | ${p.gender} | ${p.emotion} (${p.confidence.toFixed(1)}%)`;
-        overlayCtx.fillStyle = "#00e5ff";
-        overlayCtx.fillText(label, x, Math.max(16, y - 6));
-      }
-    }
-
-    async function analyzeOnce() {
-      if (!stream || analyzing) return;
-      const image = getCurrentFrameDataUrl();
-      if (!image) return;
-      analyzing = true;
-      try {
-        const data = await postJson(analyzeUrl, { image });
-        drawPredictions(data.predictions, data.frame_width, data.frame_height);
-        lastAnalyzeError = null;
-      } catch (error) {
-        setStatus(error.message, true);
-        if (error.message !== lastAnalyzeError) {
-          lastAnalyzeError = error.message;
-          sendClientLog("analysis_error", error.message, {
-            source: "analyzeOnce",
-            page: window.location.href,
-          });
-        }
-      } finally {
-        analyzing = false;
-      }
-    }
-
-    async function startCamera() {
-      if (stream) return;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "user",
-            aspectRatio: { ideal: 16 / 9 },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        });
-        videoEl.srcObject = stream;
-        await videoEl.play();
-        setStatus("Cámara encendida");
-        sendClientLog("camera_started", "La cámara se encendió correctamente.", {
-          page: window.location.href,
-        });
-        stopAnalysisLoop();
-        analyzeTimer = setInterval(analyzeOnce, analyzeIntervalMs);
-      } catch (error) {
-        setStatus("No se pudo abrir la cámara del navegador.", true);
-        sendClientLog("camera_start_error", error.message, {
-          page: window.location.href,
-        });
-      }
-    }
-
-    function stopCamera() {
-      stopAnalysisLoop();
-      stopCameraTracks();
-      videoEl.srcObject = null;
-      clearOverlay();
-      setStatus("Cámara apagada");
-    }
-
-    async function captureFrame() {
-      if (!stream) {
-        setStatus("Primero encendé la cámara.", true);
-        return;
-      }
-      try {
-        const width = videoEl.videoWidth;
-        const height = videoEl.videoHeight;
-        if (!width || !height) {
-          throw new Error("No hay frame disponible para capturar.");
-        }
-
-        const shouldDownload = window.confirm("¿Querés descargar la captura?");
-        if (!shouldDownload) {
-          setStatus("Captura descartada.");
-          return;
-        }
-
-        const captureCanvas = document.createElement("canvas");
-        captureCanvas.width = width;
-        captureCanvas.height = height;
-        const captureCtx = captureCanvas.getContext("2d");
-        captureCtx.drawImage(videoEl, 0, 0, width, height);
-        captureCtx.drawImage(overlayEl, 0, 0, width, height);
-
-        const downloadUrl = captureCanvas.toDataURL("image/jpeg", 0.92);
-        const link = document.createElement("a");
-        link.href = downloadUrl;
-        link.download = getTimestampName();
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-
-        setStatus("Captura descargada en tu dispositivo.");
-      } catch (error) {
-        setStatus(error.message, true);
-      }
-    }
-
-    startBtn.addEventListener("click", startCamera);
-    stopBtn.addEventListener("click", stopCamera);
-    captureBtn.addEventListener("click", captureFrame);
-    window.addEventListener("beforeunload", stopCamera);
-
-    setStatus("Cámara apagada");
-  </script>
+  <script src="static/js/app.js" defer></script>
 </body>
 </html>
